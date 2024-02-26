@@ -19,7 +19,7 @@ intents.guilds = True
 client = commands.Bot(command_prefix='!', intents=intents)
 
 #determines channels
-# kick_counter_channel_id = 800194841132007444
+kick_counter_channel_id = 
 
 #initializes the bot
 @client.event
