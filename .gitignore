@@ -4,3 +4,6 @@ Lib/
 Scripts/
 pyvenv.cfg
 .env
+
+# database files
+users.db
