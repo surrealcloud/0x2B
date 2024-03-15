@@ -30,8 +30,6 @@ client = commands.Bot(command_prefix="!",intents=intents)
 
 ###SQLITE3 FUNCTIONS
 
-### TODO: add extra db that just has startup variables. can hardcode the queries since you only call it like once or twice.
-
 #defines our sqlite3 functions
 def editUser(userid, nickname, perms=0, tracked=0, timeouts=0, kickbans=0):
     data = [userid, nickname, perms, tracked, timeouts, kickbans]
