@@ -7,3 +7,4 @@ pyvenv.cfg
 
 # database files
 users.db
+variables.db

@@ -9,16 +9,14 @@ from enum import Enum
 from dotenv import load_dotenv
 
 #declares our global variables
-global kick_counter_channel_id
+global punishment_channel_id
 global dbconn
 global dbcursor
 global tracked_users
-tracked_users = []
 
 #load environment variables
 load_dotenv()
 token = os.getenv("DISCORD_TOKEN")
-kick_counter_channel_id = os.getenv("KICK_CHANNEL")
 admin_id = os.getenv("ADMIN_ID")
 admin_nick = os.getenv("ADMIN_NICK")
 
@@ -32,8 +30,7 @@ client = commands.Bot(command_prefix="!",intents=intents)
 
 ###SQLITE3 FUNCTIONS
 
-### TODO: Implement function that checks if input value is None. If it is None, then replace it with value from db
-### TODO: Implement function that checks if user is in tracking list through DB (instead of using ram)
+### TODO: add extra db that just has startup variables. can hardcode the queries since you only call it like once or twice.
 
 #defines our sqlite3 functions
 def editUser(userid, nickname, perms=0, tracked=0, timeouts=0, kickbans=0):
@@ -93,7 +90,7 @@ def isWhitelisted(userid):
             users
         WHERE
             userid=? AND
-            perms>=2
+            perms>=1
     """,(userid,))
     allowed = dbcursor.fetchall()
     if allowed:
@@ -156,6 +153,57 @@ def getNickname(userid):
     else:
         return userid
 
+def isTracked(userid):
+    dbcursor.execute("""
+        SELECT
+            *
+        FROM
+            users
+        WHERE
+            userid=? AND
+            tracked=1
+    """,(userid,))
+    tracked = dbcursor.fetchall()
+    if tracked:
+        return True
+    else:
+        return False
+
+def startupVars():
+    varconn = sqlite3.connect("variables.db")
+    varcursor = varconn.cursor()
+    varcursor.execute("""
+        CREATE TABLE IF NOT EXISTS variables (
+            varname text UNIQUE,
+            value text
+        )
+    """)
+    varconn.commit()
+    varconn.close()
+
+def getVar(variable):
+    varconn = sqlite3.connect("variables.db")
+    varcursor = varconn.cursor()
+    varcursor.execute("""
+        SELECT value FROM variables WHERE varname = ?
+    """, (variable,))
+    value = varcursor.fetchall()
+    varconn.close()
+    if value:
+        return value[0][0]
+    else:
+        return None
+
+def setVar(variable, value):
+    varconn = sqlite3.connect("variables.db")
+    varcursor = varconn.cursor()
+    varcursor.execute("""
+        INSERT INTO variables(varname, value) VALUES (?, ?)
+        ON CONFLICT(varname) DO UPDATE SET value=? WHERE varname = ?
+    """, (variable, value, value, variable))
+    varconn.commit()
+    varconn.close()
+
 ###DISCORD.PY FUNCTIONS
 #initializes the bot
 @client.event
@@ -172,9 +220,10 @@ async def on_ready():
 #checks if userid is being tracked by the bot. if true, messages punishment in target channel
 @client.event
 async def on_audit_log_entry_create(entry):
-    # replace placeholder values
-    kick_channel = await client.fetch_channel(kick_counter_channel_id)
-    if entry.target.id in tracked_users:
+    kick_channel = await client.fetch_channel(punishment_channel_id)
+    if kick_channel is None:
+        print("No punishment channel set")
+    if isTracked(entry.target.id):
         kicked_user = getNickname(entry.target.id)
         if entry.after.timed_out_until is not None:
             print(f'{kicked_user} has been timed out')
@@ -223,15 +272,23 @@ async def showdata(interaction: discord.Interaction, *, member: discord.Member):
 async def trackedusers(interaction: discord.Interaction):
     dbcursor.execute("SELECT userid FROM users WHERE tracked==1")
     users = dbcursor.fetchall()
-    nicknames = []
-    for user in users:
-        nicknames.append(getNickname(user[0]))
-    await interaction.response.send_message(f"{nicknames}")
+    await interaction.response.send_message(f"{users}")
+
+#Sets the punishment channel
+@client.tree.command(name="set_punishment_channel",description="Sets the kick/ban/timeout channel")
+async def setPunishmentChannel(interaction: discord.Interaction):
+    if isWhitelisted(interaction.user.id):
+        setVar("punishment_channel_id",interaction.channel_id)
+        punishment_channel_id = int(getVar("punishment_channel_id"))
+        await interaction.response.send_message("Punishment channel has been set to this channel.")
+    else:
+        await interaction.response.send_message(f"{interaction.user.mention} you do not have permission for this command.")
 
 ###STARTUP
 
-#database headers: {USERID, NICKNAME, PERMS, TRACKED}
+#database headers: {USERID, NICKNAME, PERMS, TRACKED, TIMEOUTS, KICKBANS}
 #checks if users.db exists, if note then initiate and use set user in admin as admin
+#just checks for whether a file exists or not, less lines + probably less compute needed vs using "CREATE IF NOT EXISTS" and searching for a userid
 if os.path.isfile("users.db"):
     dbconn = sqlite3.connect("users.db")
     dbcursor = dbconn.cursor()
@@ -239,7 +296,7 @@ else:
     dbconn = sqlite3.connect("users.db")
     dbcursor = dbconn.cursor()
     dbcursor.execute("""CREATE TABLE users (
-        userid integer,
+        userid integer UNIQUE,
         nickname text,
         perms integer,
         tracked integer,
@@ -249,8 +306,9 @@ else:
     editUser(admin_id, admin_nick, 2, 0)
     dbconn.commit()
 
-trackinglist = dbcursor.execute("SELECT * FROM users WHERE tracked = 1")
-for user in trackinglist:
-    tracked_users.append(user[0])
+startupVars()
+punishment_channel_id = getVar("punishment_channel_id")
+if punishment_channel_id:
+    punishment_channel_id = int(punishment_channel_id)
 
 client.run(token)
